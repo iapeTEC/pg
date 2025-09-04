@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- App icon iOS (iPhone/iPad) -->
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Chamada PG">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+<!-- Favicons padrão -->
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+
+<!-- PWA / Android -->
+<link rel="manifest" href="/site.webmanifest">
+<link rel="mask-icon" href="/icons/safari-pinned-tab.svg" color="#9b59b6">
+<meta name="theme-color" content="#1a1a1a">
+
+  <title>Chamada – PG5</title>
+
+  <!-- Usa o MESMO CSS que você enviou -->
+  <link rel="stylesheet" href="styleApontamento.css">
+
+  <style>
+    /* Complementos leves para UX mobile */
+    .subheader {
+      display:flex; justify-content:space-between; align-items:center; gap:10px; 
+      margin: 8px 0 12px; flex-wrap: wrap;
+    }
+    .subheader .resp { color:#2ecc71; font-weight:bold; }
+    .date-row { display:flex; gap:10px; width:100%; align-items:center; }
+    .date-row input[type="date"] {
+      flex:1; background:#3d3d3d; border:1px solid #9b59b6; color:#fff;
+      border-radius:6px; padding:10px; font-size:1em;
+    }
+    .hint { font-size:.9em; opacity:.8 }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Chamada – PG5</h1>
+
+    <div class="perguntas">
+      <div class="subheader">
+        <div class="resp">Responsável: <span id="responsavel">–</span></div>
+        <div class="date-row">
+          <input type="date" id="chamadaData" />
+        </div>
+      </div>
+      <div class="hint">Marque <b>1</b> para presente e <b>0</b> para falta.</div>
+    </div>
+
+    <div class="alunos">
+      <h2>Presença dos Alunos</h2>
+      <div id="lista-alunos"></div>
+    </div>
+
+    <button id="enviar">Enviar Frequência</button>
+  </div>
+
+  <script>
+    // ====== CONFIG ESPECÍFICA DESTE ARQUIVO ======
+    const GROUP = 'PG5';
+    const RESPONSAVEL = 'Pr. Rafael'; // mostrado no header e enviado ao script
+    const API_KEY = 'AIzaSyBuxhNxlYcLM88G6BggpNO8XG8w2BY9vSE'; // <- troque
+    const ROSTER_SHEET_ID = '1SxFEoJfjJTlTXoKLiQsPRRYQVqqiPaA7wuHENIdUbhY'; // <- troque (planilha com abas PG1..PG12)
+    const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxcQHayoDbs0RkakeTkGhXMVBhH7qkwEux0kaxOkDhf1SUxOUTPXby0xPo6v_xkE0EX/exec'; // <- troque (Apps Script publicado)
+
+    // Fallback local (se a leitura do roster na planilha falhar)
+    const FALLBACK_ALUNOS = [
+      'Pedro Lucca',
+  'Grazielle Ramos',
+  'Heloísa Simões',
+  'Emanuella Cristina',
+  'Anna Clara Caparelli',
+  'Maria Luiza Fuente',
+  'Rayanne Rochele',
+  'Maria Paula',
+  'Anamin'
+    ];
+
+    // ====== STATE ======
+    let alunosAtuais = [];
+
+    // ====== HELPERS ======
+    function isoTodayInTZ(tz='America/Recife') {
+      const now = new Date();
+      const y = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year:'numeric'}).format(now);
+      const m = new Intl.DateTimeFormat('en-CA', { timeZone: tz, month:'2-digit'}).format(now);
+      const d = new Intl.DateTimeFormat('en-CA', { timeZone: tz, day:'2-digit'}).format(now);
+      return `${y}-${m}-${d}`;
+    }
+
+    function renderAlunos(nomes) {
+      const lista = document.getElementById('lista-alunos');
+      lista.innerHTML = '';
+      nomes.forEach(nome => {
+        const row = document.createElement('div');
+        row.className = 'aluno';
+        row.innerHTML = `
+          <span>${nome}</span>
+          <label class="switch">
+            <input type="checkbox" checked>
+            <span class="slider"></span>
+          </label>
+        `;
+        lista.appendChild(row);
+      });
+    }
+
+    async function loadRosterFromSheet() {
+      const base = `https://sheets.googleapis.com/v4/spreadsheets/${ROSTER_SHEET_ID}/values`;
+      // B1 = responsável (opcional: usamos o RESPONSAVEL fixo, mas tentamos pegar da planilha)
+      const respURL   = `${base}/${encodeURIComponent(GROUP+'!B1')}?key=${API_KEY}`;
+      // B2:B = nomes
+      const alunosURL = `${base}/${encodeURIComponent(GROUP+'!B2:B')}?key=${API_KEY}`;
+
+      const [respRes, alunosRes] = await Promise.all([ fetch(respURL), fetch(alunosURL) ]);
+
+      if (!alunosRes.ok) throw new Error('Falha ao ler alunos');
+
+      const respJson   = respRes.ok ? await respRes.json() : {};
+      const alunosJson = await alunosRes.json();
+
+      const nomes = (alunosJson.values || []).flat().filter(Boolean);
+      const respPlanilha = respJson.values?.[0]?.[0];
+
+      return {
+        responsavel: respPlanilha || RESPONSAVEL,
+        alunos: nomes.length ? nomes : FALLBACK_ALUNOS
+      };
+    }
+
+    function coletarPresencas() {
+      const dados = [];
+      document.querySelectorAll('#lista-alunos .aluno').forEach(div => {
+        const nome = div.querySelector('span').textContent.trim();
+        const presente = div.querySelector('input[type="checkbox"]').checked ? 1 : 0;
+        dados.push({ nome, presente });
+      });
+      return dados;
+    }
+
+    async function enviarFrequencia() {
+      const dataISO = (document.getElementById('chamadaData').value || isoTodayInTZ()).slice(0,10);
+      const payload = {
+        acao: 'registrarFrequencia',
+        grupo: GROUP,
+        responsavel: document.getElementById('responsavel').textContent || RESPONSAVEL,
+        data: dataISO,
+        alunos: coletarPresencas()
+      };
+
+      try {
+        await fetch(WEB_APP_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        document.body.innerHTML = `
+          <div class="resultado sucesso">
+            Frequência de <b>${GROUP}</b> enviada com sucesso!<br>
+            Data: ${dataISO}
+          </div>
+        `;
+      } catch (err) {
+        document.body.innerHTML = `
+          <div class="resultado erro">
+            Erro ao enviar. Faça manualmente e avise a coordenação.
+          </div>
+        `;
+      }
+    }
+
+    // ====== INIT ======
+    (async function init(){
+      document.getElementById('chamadaData').value = isoTodayInTZ();
+      try {
+        const { responsavel, alunos } = await loadRosterFromSheet();
+        document.getElementById('responsavel').textContent = responsavel || RESPONSAVEL;
+        alunosAtuais = alunos;
+      } catch (e) {
+        document.getElementById('responsavel').textContent = RESPONSAVEL;
+        alunosAtuais = FALLBACK_ALUNOS;
+      }
+      renderAlunos(alunosAtuais);
+      document.getElementById('enviar').addEventListener('click', enviarFrequencia);
+    })();
+  </script>
+</body>
+</html>
+
+
+
