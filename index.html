@@ -1,1 +1,225 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Dashboard de Assiduidade</title>
+
+  <link rel="stylesheet" href="styleApontamento.css">
+
+  <style>
+    .filters, .group-list, .report-area { background:#2c2c2c; padding:12px; border-radius:8px; margin-bottom:12px; }
+    .filters { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .filters input[type="date"] {
+      background:#3d3d3d; border:1px solid #9b59b6; color:#fff; border-radius:6px; padding:10px; font-size:1em;
+    }
+    .progress {
+      background:#3d3d3d; height:16px; border-radius:8px; overflow:hidden; margin:6px 0 2px;
+    }
+    .bar { height:100%; width:0%; background:#2ecc71; }
+    .group-row { display:flex; gap:12px; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #3d3d3d; }
+    .group-left { flex:1; }
+    .group-title { font-weight:bold; }
+    .tiny { font-size:.9em; opacity:.85; }
+    .botoes .botao { background:#3498db; }
+    .botao.print { background:#9b59b6; }
+
+    /* Zebra table for print & detail */
+    table { width:100%; border-collapse:collapse; font-size:.95em; }
+    th, td { padding:8px; border-bottom:1px solid #3d3d3d; text-align:left; }
+    tr:nth-child(even) { background:#262626; } /* zebra */
+    .hidden { display:none; }
+
+    @media print {
+      .no-print { display:none !important; }
+      body { background:#fff; color:#000; }
+      .report-area { background:#fff; }
+      tr:nth-child(even) { background:#f2f2f2; } /* zebra clara ao imprimir */
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Dashboard de Assiduidade</h1>
+
+    <div class="filters no-print">
+      <label>De: <input type="date" id="from"></label>
+      <label>Até: <input type="date" id="to"></label>
+      <button class="botao print" id="btnRelGeral">Relatório (PDF)</button>
+    </div>
+
+    <div class="group-list" id="groupList">
+      <!-- Linhas de grupos com barra e botões serão inseridas via JS -->
+    </div>
+
+    <div class="report-area hidden" id="detailArea">
+      <h2 id="detailTitle">Detalhes</h2>
+      <div id="detailContent"></div>
+      <div class="no-print" style="margin-top:8px;">
+        <button class="botao print" onclick="window.print()">Imprimir / PDF</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_KEY = 'https://script.google.com/macros/s/AKfycbwqZSD8lvB-FJphl8i46fRuNLUkR8MgnvqWkocafO6r932Ho6ZKf22RYspdAAcEJpe7/exec'; // <- troque
+    const ATTENDANCE_SHEET_ID = '1SxFEoJfjJTlTXoKLiQsPRRYQVqqiPaA7wuHENIdUbhY'; // <- troque
+    const RANGE = 'Attendance!A2:F';
+
+    const groupsOrder = ['PG1','PG2','PG3','PG4','PG5','PG6','PG7','PG8','PG9','PG10','PG11','PG12'];
+    let rows = []; // {ts, date, group, resp, aluno, pres}
+
+    function isoToday() {
+      return new Date().toISOString().slice(0,10);
+    }
+
+    function setDefaultRange() {
+      const to = document.getElementById('to');
+      const from = document.getElementById('from');
+      to.value = isoToday();
+      // 60 dias atrás
+      const d = new Date(); d.setDate(d.getDate()-60);
+      from.value = d.toISOString().slice(0,10);
+    }
+
+    async function fetchAttendance() {
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${ATTENDANCE_SHEET_ID}/values/${encodeURIComponent(RANGE)}?key=${API_KEY}`;
+      const r = await fetch(url);
+      if (!r.ok) throw new Error('Falha ao ler Attendance');
+      const j = await r.json();
+      rows = (j.values || []).map(a => ({
+        ts: a[0] || '', date: a[1] || '', group: a[2] || '', resp: a[3] || '', aluno: a[4] || '', pres: Number(a[5]||0)
+      }));
+    }
+
+    function withinRange(date, from, to) {
+      if (!date) return false;
+      return (!from || date >= from) && (!to || date <= to);
+    }
+
+    function computeGroupStats(from, to) {
+      const stats = {}; // group => {present: n, total: n, resp: (last seen)}
+      rows.forEach(r=>{
+        if (!withinRange(r.date, from, to)) return;
+        const g = r.group || '—';
+        if (!stats[g]) stats[g] = {present:0, total:0, resp:r.resp||''};
+        stats[g].present += (r.pres ? 1 : 0);
+        stats[g].total += 1;
+        if (r.resp) stats[g].resp = r.resp;
+      });
+      return stats;
+    }
+
+    function renderGroups(stats) {
+      const wrap = document.getElementById('groupList');
+      wrap.innerHTML = '';
+      groupsOrder.forEach(g=>{
+        const s = stats[g] || {present:0,total:0,resp:''};
+        const pct = s.total ? Math.round((100*s.present)/s.total) : 0;
+
+        const row = document.createElement('div');
+        row.className = 'group-row';
+        row.innerHTML = `
+          <div class="group-left">
+            <div class="group-title">${g} <span class="tiny">• Resp.: ${s.resp || '—'}</span></div>
+            <div class="progress"><div class="bar" style="width:${pct}%"></div></div>
+            <div class="tiny">Assiduidade: ${pct}% (${s.present}/${s.total})</div>
+          </div>
+          <div class="botoes no-print">
+            <button class="botao" data-group="${g}">Relatório detalhado</button>
+          </div>
+        `;
+        row.querySelector('button.botao').onclick = () => showGroupDetail(g);
+        wrap.appendChild(row);
+      });
+
+      // Botão geral (acima) já está no header
+      document.getElementById('btnRelGeral').onclick = showGlobalReport;
+    }
+
+    function showGroupDetail(group) {
+      const from = document.getElementById('from').value;
+      const to   = document.getElementById('to').value;
+
+      // por aluno: soma presentes e faltas no range
+      const map = {}; // aluno => {present, absent}
+      let resp = '';
+      rows.forEach(r=>{
+        if (r.group!==group) return;
+        if (!withinRange(r.date, from, to)) return;
+        if (!map[r.aluno]) map[r.aluno] = {present:0, absent:0};
+        r.pres ? map[r.aluno].present++ : map[r.aluno].absent++;
+        if (r.resp) resp = r.resp;
+      });
+
+      const title = document.getElementById('detailTitle');
+      const content = document.getElementById('detailContent');
+      title.textContent = `Relatório Detalhado – ${group} (Resp.: ${resp || '—'})`;
+      const alunos = Object.keys(map).sort((a,b)=> (map[b].absent - map[a].absent) || a.localeCompare(b));
+
+      let html = `
+        <table>
+          <thead><tr>
+            <th>Aluno</th><th>Faltas</th><th>Presenças</th>
+          </tr></thead>
+          <tbody>
+      `;
+      alunos.forEach(nome=>{
+        html += `<tr><td>${nome}</td><td>${map[nome].absent}</td><td>${map[nome].present}</td></tr>`;
+      });
+      html += `</tbody></table>`;
+      content.innerHTML = html;
+
+      document.getElementById('detailArea').classList.remove('hidden');
+      window.scrollTo({ top: document.getElementById('detailArea').offsetTop-10, behavior:'smooth' });
+    }
+
+    function showGlobalReport() {
+      const from = document.getElementById('from').value;
+      const to   = document.getElementById('to').value;
+
+      // por dia x grupo: lista de presenças/faltas (resumo)
+      const header = ['Data','Grupo','Responsável','Aluno','Presente(1/0)'];
+      const arr = rows
+        .filter(r=> withinRange(r.date, from, to))
+        .sort((a,b)=> (a.date+b.group+a.aluno).localeCompare(b.date+b.group+b.aluno));
+
+      let html = `<table><thead><tr>${header.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>`;
+      arr.forEach(r=>{
+        html += `<tr><td>${r.date}</td><td>${r.group}</td><td>${r.resp}</td><td>${r.aluno}</td><td>${r.pres}</td></tr>`;
+      });
+      html += `</tbody></table>`;
+
+      const title = document.getElementById('detailTitle');
+      const content = document.getElementById('detailContent');
+      title.textContent = `Relatório Geral (zebrado) – ${from || 'início'} a ${to || 'hoje'}`;
+      content.innerHTML = html;
+
+      document.getElementById('detailArea').classList.remove('hidden');
+      window.scrollTo({ top: document.getElementById('detailArea').offsetTop-10, behavior:'smooth' });
+
+      // Abre diálogo de impressão direto
+      setTimeout(()=>window.print(), 300);
+    }
+
+    async function refresh() {
+      await fetchAttendance();
+      const from = document.getElementById('from').value;
+      const to   = document.getElementById('to').value;
+      const stats = computeGroupStats(from, to);
+      renderGroups(stats);
+    }
+
+    // INIT
+    (function(){
+      setDefaultRange();
+      document.getElementById('from').addEventListener('change', refresh);
+      document.getElementById('to').addEventListener('change', refresh);
+      refresh().catch(err=>{
+        document.getElementById('groupList').innerHTML = `<div class="resultado erro">Erro ao carregar dados. Verifique se a planilha Attendance está pública para leitura.</div>`;
+      });
+    })();
+  </script>
+</body>
+</html>
 
