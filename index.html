@@ -32,7 +32,7 @@
     .botao.print:hover{ filter:brightness(.95); }
 
     .group-row { display:flex; gap:12px; justify-content:space-between; align-items:center; padding:12px 0; border-bottom:1px solid #3d3d3d; }
-    .group-left { flex:1; padding-right:32px; } /* reserva espaço pro knob */
+    .group-left { flex:1; padding-right:48px; } /* reserva espaço pro knob não cobrir o botão */
     .group-title { font-weight:bold; text-align:center; }
     .tiny { font-size:.9em; opacity:.85; text-align:center; }
 
@@ -41,17 +41,17 @@
       background:#3d3d3d;
       height:16px;
       border-radius:8px;
-      overflow:visible;          /* knob para fora */
+      overflow:visible;          /* knob pode sair pra fora */
       margin:8px 0 6px;
     }
     .bar { height:100%; width:0%; background:#2ecc71; border-radius:8px; }
     .knob {
       position:absolute; top:50%;
-      transform:translate(0,-50%);
       width:28px; height:28px; border-radius:50%;
       border:2px solid #1a1a1a;
       background:#b3d9ff; background-size:cover; background-position:center;
       box-shadow:0 0 0 2px #2c2c2c;
+      /* transform é definido inline pra ajustar 16px pra fora */
     }
 
     .late-warning {
@@ -121,8 +121,9 @@
 
     // ===== STATE =====
     let rows = [];     // Attendance rows
-    let roster = [];   // [{group, student, photo}]
+    let roster = [];   // [{group, aluno, photo}]
     let groups = {};   // { PGx: {resp, photo} }
+    let rosterByGroupKey = {}; // { PGx: { normKey(name): DisplayName } }
 
     // ===== HELPERS =====
     function isoTodayInTZ(tz='America/Recife') {
@@ -149,8 +150,27 @@
       return (await r.json()).values || [];
     }
 
-    function isPG(name){
-      return /^PG\d+$/i.test((name||'').trim());
+    // normaliza grupo: "PG 6" -> "PG6"
+    function normGroup(g){ return String(g||'').toUpperCase().replace(/\s+/g,''); }
+    // é um PG válido?
+    function isPG(name){ return /^PG\d+$/i.test(normGroup(name)); }
+    // chave normalizada de nome (remove NBSP, múltiplos espaços, trim, lower)
+    function normKey(name){
+      return String(name||'')
+        .normalize('NFC')
+        .replace(/\u00A0/g,' ')
+        .replace(/\s+/g,' ')
+        .trim()
+        .toLowerCase();
+    }
+
+    function buildRosterMaps(){
+      rosterByGroupKey = {};
+      roster.forEach(r=>{
+        const g = normGroup(r.group);
+        if (!rosterByGroupKey[g]) rosterByGroupKey[g] = {};
+        rosterByGroupKey[g][normKey(r.aluno)] = r.aluno; // guarda o "bonito"
+      });
     }
 
     async function fetchAll(){
@@ -160,17 +180,29 @@
         fetchValues(RANGE_GRP).catch(()=>[])
       ]);
 
-      rows = att.map(a => ({ ts:a[0]||'', date:a[1]||'', group:a[2]||'', resp:a[3]||'', aluno:a[4]||'', pres:Number(a[5]||0) }));
+      // Attendance normalizado
+      rows = att.map(a => ({
+        ts:   a[0] || '',
+        date: a[1] || '',
+        group:normGroup(a[2] || ''),
+        resp: a[3] || '',
+        aluno:a[4] || '',
+        pres: Number(a[5] || 0)
+      }));
 
+      // Roster normalizado
       roster = ros
-        .map(r => ({ group: r[0]||'', aluno: r[1]||'', photo: r[2]||'' }))
+        .map(r => ({ group: normGroup(r[0]||''), aluno: r[1]||'', photo: r[2]||'' }))
         .filter(x=> x.aluno && isPG(x.group));
 
+      // Groups normalizado
       groups = {};
       grp.forEach(g=>{
-        const key = (g[0]||'').trim();
+        const key = normGroup(g[0]||'');
         if (isPG(key)) groups[key] = { resp: g[1]||'', photo: g[2]||'' };
       });
+
+      buildRosterMaps();
     }
 
     function withinRange(date, from, to){
@@ -210,9 +242,14 @@
       const todayRows = rows.filter(r=> r.group===targetGroup && r.date===today);
       if (!todayRows.length) return { absent: [], present: [] };
 
-      const presentSet = new Set(todayRows.filter(r=> r.pres===1).map(r=> r.aluno));
-      const absentSet  = new Set(todayRows.filter(r=> r.pres===0).map(r=> r.aluno));
-      return { absent: [...absentSet].sort((a,b)=>a.localeCompare(b,'pt-BR')), present: [...presentSet] };
+      const presentKeys = new Set(todayRows.filter(r=> r.pres===1).map(r=> normKey(r.aluno)));
+      const absentKeys  = new Set(todayRows.filter(r=> r.pres===0).map(r=> normKey(r.aluno)));
+
+      const pretty = k => rosterByGroupKey[targetGroup]?.[k] || k;
+      return {
+        absent: [...absentKeys].map(pretty).sort((a,b)=>a.localeCompare(b,'pt-BR')),
+        present:[...presentKeys].map(pretty)
+      };
     }
 
     function isAfterTuesdayDeadline(){
@@ -245,13 +282,14 @@
         row.className = 'group-row';
         const photo = (groups[g]?.photo || '').trim();
 
-        // knob fora da barra, colado (+2px)
+        // knob fora da barra, coladinho (+ ~16px = meio diâmetro)
         row.innerHTML = `
           <div class="group-left">
             <div class="group-title">${g} ${s.resp ? `<span class="tiny">• Resp.: ${s.resp}</span>`:''}</div>
             <div class="progress">
               <div class="bar" style="width:${pct}%"></div>
-              <div class="knob" style="left: calc(${pct}% + 2px);${photo ? `background-image:url('${photo.replace(/'/g,"\\'")}')` : ''}"></div>
+              <div class="knob"
+                   style="left:${pct}%; transform:translate(16px,-50%); ${photo ? `background-image:url('${photo.replace(/'/g,"\\'")}')` : ''}"></div>
             </div>
             <div class="tiny">Assiduidade: ${pct}% (${s.present}/${s.total})</div>
           </div>
@@ -306,18 +344,22 @@
       const from = document.getElementById('from').value;
       const to   = document.getElementById('to').value;
 
-      const byAluno = {}; // nome => {present, absent}
+      const byAluno = {}; // key => {name, present, absent}
       let resp = groups[group]?.resp || '';
       rows.forEach(r=>{
         if (r.group !== group) return;
         if (!withinRange(r.date, from, to)) return;
-        if (!byAluno[r.aluno]) byAluno[r.aluno] = {present:0, absent:0};
-        r.pres ? byAluno[r.aluno].present++ : byAluno[r.aluno].absent++;
+
+        const key = normKey(r.aluno);
+        const display = rosterByGroupKey[group]?.[key] || String(r.aluno||'').trim();
+
+        if (!byAluno[key]) byAluno[key] = { name: display, present:0, absent:0 };
+        r.pres ? byAluno[key].present++ : byAluno[key].absent++;
         if (r.resp) resp = r.resp;
       });
 
-      const alunos = Object.keys(byAluno)
-        .sort((a,b)=> (byAluno[b].absent - byAluno[a].absent) || a.localeCompare(b,'pt-BR'));
+      const alunos = Object.values(byAluno)
+        .sort((a,b)=> (b.absent - a.absent) || a.name.localeCompare(b.name,'pt-BR'));
 
       const title = document.getElementById('detailTitle');
       const content = document.getElementById('detailContent');
@@ -325,9 +367,8 @@
 
       let html = `<table>
         <thead><tr><th>Aluno</th><th>Faltas</th><th>Presenças</th></tr></thead><tbody>`;
-      alunos.forEach(nome=>{
-        const it = byAluno[nome];
-        html += `<tr><td>${nome}</td><td>${it.absent}</td><td>${it.present}</td></tr>`;
+      alunos.forEach(it=>{
+        html += `<tr><td>${it.name}</td><td>${it.absent}</td><td>${it.present}</td></tr>`;
       });
       html += `</tbody></table>`;
       content.innerHTML = html;
