@@ -30,11 +30,20 @@
     .group-title { font-weight:bold; text-align:center; }
     .tiny { font-size:.9em; opacity:.85; text-align:center; }
 
-    .progress { position:relative; background:#3d3d3d; height:16px; border-radius:8px; overflow:hidden; margin:8px 0 6px; }
-    .bar { height:100%; width:0%; background:#2ecc71; }
+    .progress {
+      position:relative;
+      background:#3d3d3d;
+      height:16px;
+      border-radius:8px;
+      overflow:visible;          /* <- permite o knob fora da barra */
+      margin:8px 0 6px;
+    }
+    .bar { height:100%; width:0%; background:#2ecc71; border-radius:8px; }
     .knob {
-      position:absolute; top:50%; transform:translate(-50%,-50%);
-      width:28px; height:28px; border-radius:50%; border:2px solid #1a1a1a;
+      position:absolute; top:50%;
+      transform:translate(0,-50%); /* <- não centraliza mais no meio, a “borda” fica fora */
+      width:32px; height:32px; border-radius:50%;
+      border:2px solid #1a1a1a;
       background:#b3d9ff; background-size:cover; background-position:center;
       box-shadow:0 0 0 2px #2c2c2c;
     }
@@ -101,8 +110,8 @@
     const API_KEY = 'AIzaSyBuxhNxlYcLM88G6BggpNO8XG8w2BY9vSE';
     const SHEET_ID = '1SxFEoJfjJTlTXoKLiQsPRRYQVqqiPaA7wuHENIdUbhY';
     const RANGE_ATT = 'Attendance!A2:F';
-    const RANGE_ROS = 'Roster!A:C';
-    const RANGE_GRP = 'Groups!A:C';
+    const RANGE_ROS = 'Roster!A2:C';  // <- começa na linha 2 (sem cabeçalho)
+    const RANGE_GRP = 'Groups!A2:C';  // <- idem
 
     // ===== STATE =====
     let rows = [];     // Attendance rows
@@ -134,20 +143,27 @@
       return (await r.json()).values || [];
     }
 
+    function isPG(name){
+      return /^PG\d+$/i.test((name||'').trim());
+    }
+
     async function fetchAll(){
       const [att, ros, grp] = await Promise.all([
         fetchValues(RANGE_ATT),
         fetchValues(RANGE_ROS).catch(()=>[]),
         fetchValues(RANGE_GRP).catch(()=>[])
       ]);
+
       rows = att.map(a => ({ ts:a[0]||'', date:a[1]||'', group:a[2]||'', resp:a[3]||'', aluno:a[4]||'', pres:Number(a[5]||0) }));
 
-      roster = ros.map(r => ({ group: r[0]||'', aluno: r[1]||'', photo: r[2]||'' }));
+      roster = ros
+        .map(r => ({ group: r[0]||'', aluno: r[1]||'', photo: r[2]||'' }))
+        .filter(x=> x.aluno && isPG(x.group));
+
       groups = {};
       grp.forEach(g=>{
         const key = (g[0]||'').trim();
-        if (!key) return;
-        groups[key] = { resp: g[1]||'', photo: g[2]||'' };
+        if (isPG(key)) groups[key] = { resp: g[1]||'', photo: g[2]||'' };
       });
     }
 
@@ -158,10 +174,14 @@
     function uniqueGroups(){
       const from = document.getElementById('from').value;
       const to   = document.getElementById('to').value;
-      const set = new Set(rows.filter(r=>withinRange(r.date,from,to)).map(r=>r.group).filter(Boolean));
+      const set = new Set(
+        rows.filter(r=> withinRange(r.date,from,to))
+            .map(r=>r.group)
+            .filter(isPG)
+      );
       // adiciona grupos que ainda não tiveram chamada no range, mas existem no Groups/Roster
-      roster.forEach(r=> set.add(r.group));
-      Object.keys(groups).forEach(g=> set.add(g));
+      roster.forEach(r=> { if (isPG(r.group)) set.add(r.group); });
+      Object.keys(groups).forEach(g=> { if (isPG(g)) set.add(g); });
       return [...set].sort((a,b)=> a.localeCompare(b,'pt-BR',{numeric:true}));
     }
 
@@ -169,37 +189,29 @@
       const stats = {}; // group => {present,total,resp}
       rows.forEach(r=>{
         if (!withinRange(r.date, from, to)) return;
-        const g = r.group || '—';
-        if (!stats[g]) stats[g] = {present:0, total:0, resp: r.resp || (groups[g]?.resp || '')};
+        if (!isPG(r.group)) return;
+        const g = r.group;
+        if (!stats[g]) stats[g] = {present:0, total:0, resp: groups[g]?.resp || ''};
         stats[g].present += (r.pres ? 1 : 0);
         stats[g].total   += 1;
         if (r.resp) stats[g].resp = r.resp;
-      });
-      // preenche resp a partir de Groups se não veio do Attendance
-      Object.keys(stats).forEach(g=>{
-        if (!stats[g].resp && groups[g]?.resp) stats[g].resp = groups[g].resp;
       });
       return stats;
     }
 
     function todaysAbsentsByGroup(targetGroup){
       const today = isoTodayInTZ();
-      // alunos presentes/ausentes de hoje (pelo Attendance)
       const todayRows = rows.filter(r=> r.group===targetGroup && r.date===today);
       if (!todayRows.length) return { absent: [], present: [] };
 
       const presentSet = new Set(todayRows.filter(r=> r.pres===1).map(r=> r.aluno));
       const absentSet  = new Set(todayRows.filter(r=> r.pres===0).map(r=> r.aluno));
-
-      // Se faltar algum nome no Attendance de hoje, não consideramos ausente automático.
-      // (Você já coleta todos, então OK.)
       return { absent: [...absentSet].sort((a,b)=>a.localeCompare(b,'pt-BR')), present: [...presentSet] };
     }
 
     function isAfterTuesdayDeadline(){
       const now = nowInTZ('America/Recife');
-      // 0=Dom ... 2=Terça
-      const isTuesday = (now.getDay() === 2);
+      const isTuesday = (now.getDay() === 2); // 0=Dom ... 2=Terça
       if (!isTuesday) return false;
       const deadline = new Date(now);
       deadline.setHours(19,30,0,0);
@@ -227,12 +239,13 @@
         row.className = 'group-row';
         const photo = (groups[g]?.photo || '').trim();
 
+        // knob fora da barra: left = % + 12px (margem)
         row.innerHTML = `
           <div class="group-left">
             <div class="group-title">${g} ${s.resp ? `<span class="tiny">• Resp.: ${s.resp}</span>`:''}</div>
             <div class="progress">
               <div class="bar" style="width:${pct}%"></div>
-              <div class="knob" style="left:${pct}%;${photo ? `background-image:url('${photo.replace(/'/g,"\\'")}')` : ''}"></div>
+              <div class="knob" style="left: calc(${pct}% + 12px);${photo ? `background-image:url('${photo.replace(/'/g,"\\'")}')` : ''}"></div>
             </div>
             <div class="tiny">Assiduidade: ${pct}% (${s.present}/${s.total})</div>
           </div>
@@ -242,7 +255,7 @@
         `;
         row.querySelector('button[data-group]').onclick = () => showGroupDetail(g);
 
-        // Aviso goiaba
+        // Aviso / faltosos de hoje
         if (afterDeadline) {
           const hasToday = rows.some(r=> r.group===g && r.date===today);
           if (!hasToday) {
@@ -251,7 +264,6 @@
             warn.textContent = 'Adulto ainda não enviou a lista de chamada';
             row.appendChild(warn);
           } else {
-            // botão "hoje faltou X"
             const { absent } = todaysAbsentsByGroup(g);
             const cont = document.createElement('div');
             cont.className = 'late-actions';
@@ -324,7 +336,7 @@
 
       const header = ['Data','Grupo','Responsável','Aluno','Presente(1/0)'];
       const arr = rows
-        .filter(r => withinRange(r.date, from, to))
+        .filter(r => withinRange(r.date, from, to) && isPG(r.group))
         .sort((a,b)=> (a.date+a.group+a.aluno).localeCompare(b.date+b.group+b.aluno,'pt-BR'));
 
       const title = document.getElementById('detailTitle');
