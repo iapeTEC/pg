@@ -3,65 +3,71 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<!-- App icon iOS -->
-<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Chamada PG">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
-<!-- Favicons -->
-<link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32x32.png">
-<link rel="icon" type="image/png" sizes="16x16" href="./icons/favicon-16x16.png">
-<!-- (opcional) ajuda compatibilidade -->
-<link rel="icon" href="./icons/favicon.ico">
-
-<!-- Manifest (PWA/Android) -->
-<link rel="manifest" href="./site.webmanifest">
-
-<!-- (opcional) Safari macOS — só deixe se o arquivo existir -->
-<!-- <link rel="mask-icon" href="./icons/safari-pinned-tab.svg" color="#9b59b6"> -->
-
-<meta name="theme-color" content="#1a1a1a">
-
+  <!-- Ícones / Manifest -->
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Chamada PG">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="./icons/favicon-16x16.png">
+  <link rel="manifest" href="./site.webmanifest">
+  <meta name="theme-color" content="#1a1a1a">
 
   <title>Dashboard de Assiduidade</title>
-
-  <!-- Usa seu CSS existente -->
   <link rel="stylesheet" href="styleApontamento.css">
 
   <style>
     .filters, .group-list, .report-area { background:#2c2c2c; padding:12px; border-radius:8px; margin-bottom:12px; }
-    .filters { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .filters { display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:center; }
     .filters input[type="date"] {
       background:#3d3d3d; border:1px solid #9b59b6; color:#fff; border-radius:6px; padding:10px; font-size:1em;
     }
     .filters .botao { background:#9b59b6; border:none; border-radius:6px; padding:10px 14px; cursor:pointer; font-weight:bold; }
-    .progress { background:#3d3d3d; height:16px; border-radius:8px; overflow:hidden; margin:6px 0 2px; }
-    .bar { height:100%; width:0%; background:#2ecc71; }
-    .group-row { display:flex; gap:12px; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #3d3d3d; }
-    .group-left { flex:1; }
-    .group-title { font-weight:bold; }
-    .tiny { font-size:.9em; opacity:.85; }
-    .botoes .botao { background:#3498db; }
-    .botao.print { background:#9b59b6; }
 
-    /* Tabela zebrada (detalhes e relatório geral) */
+    .group-row { display:flex; gap:12px; justify-content:space-between; align-items:center; padding:12px 0; border-bottom:1px solid #3d3d3d; }
+    .group-left { flex:1; }
+    .group-title { font-weight:bold; text-align:center; }
+    .tiny { font-size:.9em; opacity:.85; text-align:center; }
+
+    .progress { position:relative; background:#3d3d3d; height:16px; border-radius:8px; overflow:hidden; margin:8px 0 6px; }
+    .bar { height:100%; width:0%; background:#2ecc71; }
+    .knob {
+      position:absolute; top:50%; transform:translate(-50%,-50%);
+      width:28px; height:28px; border-radius:50%; border:2px solid #1a1a1a;
+      background:#b3d9ff; background-size:cover; background-position:center;
+      box-shadow:0 0 0 2px #2c2c2c;
+    }
+
+    .late-warning {
+      background:#ff8a80; color:#1a1a1a; padding:8px; border-radius:6px; margin-top:6px; text-align:center;
+    }
+    .late-actions { margin-top:6px; display:flex; gap:8px; justify-content:center; }
+    .btn { border:none; border-radius:6px; padding:8px 12px; font-weight:bold; cursor:pointer; }
+    .btn.info { background:#3498db; color:#fff; }
+
+    /* Modal */
+    .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; z-index:999; }
+    .modal { background:#2c2c2c; padding:16px; border-radius:10px; max-width:420px; width:92%; }
+    .modal h3 { margin-top:0; text-align:center; }
+    .modal .btn { display:block; margin:10px auto 0; }
+
+    /* Tabela zebrada (relatórios) */
     table { width:100%; border-collapse:collapse; font-size:.95em; }
     th, td { padding:8px; border-bottom:1px solid #3d3d3d; text-align:left; }
     tr:nth-child(even) { background:#262626; }
-    .hidden { display:none; }
 
     @media print {
       .no-print { display:none !important; }
       body { background:#fff; color:#000; }
       .report-area { background:#fff; }
-      tr:nth-child(even) { background:#f2f2f2; } /* zebra clara ao imprimir */
+      tr:nth-child(even) { background:#f2f2f2; }
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>Dashboard de Assiduidade</h1>
+    <h1 style="text-align:center;">Dashboard de Assiduidade</h1>
 
     <div class="filters no-print">
       <label>De: <input type="date" id="from"></label>
@@ -70,55 +76,79 @@
       <button class="botao print" id="btnRelGeral">Relatório (PDF)</button>
     </div>
 
-    <div class="group-list" id="groupList">
-      <!-- preenchido via JS -->
-    </div>
+    <div class="group-list" id="groupList"></div>
 
     <div class="report-area hidden" id="detailArea">
-      <h2 id="detailTitle">Detalhes</h2>
+      <h2 id="detailTitle" style="text-align:center;">Detalhes</h2>
       <div id="detailContent"></div>
-      <div class="no-print" style="margin-top:8px;">
+      <div class="no-print" style="margin-top:8px; text-align:center;">
         <button class="botao print" onclick="window.print()">Imprimir / PDF</button>
       </div>
     </div>
   </div>
 
+  <!-- Modal -->
+  <div class="modal-backdrop" id="modal">
+    <div class="modal">
+      <h3 id="modalTitle">Faltosos de hoje</h3>
+      <div id="modalBody"></div>
+      <button class="btn" onclick="closeModal()">OK</button>
+    </div>
+  </div>
+
   <script>
     // ===== CONFIG =====
-    const API_KEY = 'AIzaSyBuxhNxlYcLM88G6BggpNO8XG8w2BY9vSE'; // <-- COLE aqui sua Google API key (começa com AIza...)
-    const ATTENDANCE_SHEET_ID = '1SxFEoJfjJTlTXoKLiQsPRRYQVqqiPaA7wuHENIdUbhY';
-    const RANGE = 'Attendance!A2:F';
+    const API_KEY = 'AIzaSyBuxhNxlYcLM88G6BggpNO8XG8w2BY9vSE';
+    const SHEET_ID = '1SxFEoJfjJTlTXoKLiQsPRRYQVqqiPaA7wuHENIdUbhY';
+    const RANGE_ATT = 'Attendance!A2:F';
+    const RANGE_ROS = 'Roster!A:C';
+    const RANGE_GRP = 'Groups!A:C';
 
     // ===== STATE =====
-    let rows = []; // {ts, date, group, resp, aluno, pres}
+    let rows = [];     // Attendance rows
+    let roster = [];   // [{group, student, photo}]
+    let groups = {};   // { PGx: {resp, photo} }
 
     // ===== HELPERS =====
-    function isoToday(){ return new Date().toISOString().slice(0,10); }
+    function isoTodayInTZ(tz='America/Recife') {
+      const now = new Date();
+      const y = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year:'numeric'}).format(now);
+      const m = new Intl.DateTimeFormat('en-CA', { timeZone: tz, month:'2-digit'}).format(now);
+      const d = new Intl.DateTimeFormat('en-CA', { timeZone: tz, day:'2-digit'}).format(now);
+      return `${y}-${m}-${d}`;
+    }
+    function nowInTZ(tz='America/Recife'){ return new Date(new Date().toLocaleString('en-US',{timeZone:tz})); }
 
     function setDefaultRange(){
       const to = document.getElementById('to');
       const from = document.getElementById('from');
-      to.value = isoToday();
-      const d = new Date(); d.setDate(d.getDate()-60);
+      to.value = isoTodayInTZ();
+      const d = nowInTZ(); d.setDate(d.getDate()-60);
       from.value = d.toISOString().slice(0,10);
     }
 
-    async function fetchAttendance(){
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${ATTENDANCE_SHEET_ID}/values/${encodeURIComponent(RANGE)}?key=${API_KEY}`;
+    async function fetchValues(range){
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(range)}?key=${API_KEY}`;
       const r = await fetch(url);
-      if (!r.ok) {
-        const text = await r.text().catch(()=> '');
-        throw new Error('Falha ao ler Attendance (Sheets API). Verifique API key e permissão pública.\n' + text);
-      }
-      const j = await r.json();
-      rows = (j.values || []).map(a => ({
-        ts: a[0] || '',              // Timestamp
-        date: a[1] || '',            // YYYY-MM-DD
-        group: a[2] || '',           // PG1...
-        resp: a[3] || '',            // Responsável
-        aluno: a[4] || '',           // Nome
-        pres: Number(a[5] || 0)      // 0/1
-      }));
+      if (!r.ok) throw new Error('Falha ao ler: '+range);
+      return (await r.json()).values || [];
+    }
+
+    async function fetchAll(){
+      const [att, ros, grp] = await Promise.all([
+        fetchValues(RANGE_ATT),
+        fetchValues(RANGE_ROS).catch(()=>[]),
+        fetchValues(RANGE_GRP).catch(()=>[])
+      ]);
+      rows = att.map(a => ({ ts:a[0]||'', date:a[1]||'', group:a[2]||'', resp:a[3]||'', aluno:a[4]||'', pres:Number(a[5]||0) }));
+
+      roster = ros.map(r => ({ group: r[0]||'', aluno: r[1]||'', photo: r[2]||'' }));
+      groups = {};
+      grp.forEach(g=>{
+        const key = (g[0]||'').trim();
+        if (!key) return;
+        groups[key] = { resp: g[1]||'', photo: g[2]||'' };
+      });
     }
 
     function withinRange(date, from, to){
@@ -126,21 +156,54 @@
     }
 
     function uniqueGroups(){
-      return [...new Set(rows.map(r => r.group).filter(Boolean))]
-             .sort((a,b)=> a.localeCompare(b,'pt-BR',{numeric:true}));
+      const from = document.getElementById('from').value;
+      const to   = document.getElementById('to').value;
+      const set = new Set(rows.filter(r=>withinRange(r.date,from,to)).map(r=>r.group).filter(Boolean));
+      // adiciona grupos que ainda não tiveram chamada no range, mas existem no Groups/Roster
+      roster.forEach(r=> set.add(r.group));
+      Object.keys(groups).forEach(g=> set.add(g));
+      return [...set].sort((a,b)=> a.localeCompare(b,'pt-BR',{numeric:true}));
     }
 
-    function computeGroupStats(from, to){
+    function computeStats(from, to){
       const stats = {}; // group => {present,total,resp}
       rows.forEach(r=>{
         if (!withinRange(r.date, from, to)) return;
         const g = r.group || '—';
-        if (!stats[g]) stats[g] = {present:0, total:0, resp:r.resp||''};
+        if (!stats[g]) stats[g] = {present:0, total:0, resp: r.resp || (groups[g]?.resp || '')};
         stats[g].present += (r.pres ? 1 : 0);
         stats[g].total   += 1;
-        if (r.resp) stats[g].resp = r.resp; // mantém o último visto
+        if (r.resp) stats[g].resp = r.resp;
+      });
+      // preenche resp a partir de Groups se não veio do Attendance
+      Object.keys(stats).forEach(g=>{
+        if (!stats[g].resp && groups[g]?.resp) stats[g].resp = groups[g].resp;
       });
       return stats;
+    }
+
+    function todaysAbsentsByGroup(targetGroup){
+      const today = isoTodayInTZ();
+      // alunos presentes/ausentes de hoje (pelo Attendance)
+      const todayRows = rows.filter(r=> r.group===targetGroup && r.date===today);
+      if (!todayRows.length) return { absent: [], present: [] };
+
+      const presentSet = new Set(todayRows.filter(r=> r.pres===1).map(r=> r.aluno));
+      const absentSet  = new Set(todayRows.filter(r=> r.pres===0).map(r=> r.aluno));
+
+      // Se faltar algum nome no Attendance de hoje, não consideramos ausente automático.
+      // (Você já coleta todos, então OK.)
+      return { absent: [...absentSet].sort((a,b)=>a.localeCompare(b,'pt-BR')), present: [...presentSet] };
+    }
+
+    function isAfterTuesdayDeadline(){
+      const now = nowInTZ('America/Recife');
+      // 0=Dom ... 2=Terça
+      const isTuesday = (now.getDay() === 2);
+      if (!isTuesday) return false;
+      const deadline = new Date(now);
+      deadline.setHours(19,30,0,0);
+      return now.getTime() >= deadline.getTime();
     }
 
     function renderGroups(stats){
@@ -149,39 +212,84 @@
 
       const order = uniqueGroups();
       if (!order.length) {
-        wrap.innerHTML = `<div class="resultado erro">Sem registros na planilha Attendance para o período selecionado.</div>`;
+        wrap.innerHTML = `<div class="resultado erro">Sem registros/roster para o período.</div>`;
         return;
       }
 
+      const afterDeadline = isAfterTuesdayDeadline();
+      const today = isoTodayInTZ();
+
       order.forEach(g=>{
-        const s = stats[g] || {present:0,total:0,resp:''};
+        const s = stats[g] || {present:0,total:0,resp: (groups[g]?.resp || '')};
         const pct = s.total ? Math.round(100*s.present/s.total) : 0;
 
         const row = document.createElement('div');
         row.className = 'group-row';
+        const photo = (groups[g]?.photo || '').trim();
+
         row.innerHTML = `
           <div class="group-left">
-            <div class="group-title">${g} <span class="tiny">• Resp.: ${s.resp || '—'}</span></div>
-            <div class="progress"><div class="bar" style="width:${pct}%"></div></div>
+            <div class="group-title">${g} ${s.resp ? `<span class="tiny">• Resp.: ${s.resp}</span>`:''}</div>
+            <div class="progress">
+              <div class="bar" style="width:${pct}%"></div>
+              <div class="knob" style="left:${pct}%;${photo ? `background-image:url('${photo.replace(/'/g,"\\'")}')` : ''}"></div>
+            </div>
             <div class="tiny">Assiduidade: ${pct}% (${s.present}/${s.total})</div>
           </div>
           <div class="botoes no-print">
-            <button class="botao" data-group="${g}">Relatório detalhado</button>
+            <button class="btn info" data-group="${g}">Relatório detalhado</button>
           </div>
         `;
-        row.querySelector('button.botao').onclick = () => showGroupDetail(g);
+        row.querySelector('button[data-group]').onclick = () => showGroupDetail(g);
+
+        // Aviso goiaba
+        if (afterDeadline) {
+          const hasToday = rows.some(r=> r.group===g && r.date===today);
+          if (!hasToday) {
+            const warn = document.createElement('div');
+            warn.className = 'late-warning';
+            warn.textContent = 'Adulto ainda não enviou a lista de chamada';
+            row.appendChild(warn);
+          } else {
+            // botão "hoje faltou X"
+            const { absent } = todaysAbsentsByGroup(g);
+            const cont = document.createElement('div');
+            cont.className = 'late-actions';
+            const b = document.createElement('button');
+            b.className = 'btn info';
+            b.textContent = `Hoje faltou ${absent.length} aluno(s)`;
+            b.onclick = () => openModal(`Faltosos de hoje – ${g}`, absent);
+            cont.appendChild(b);
+            row.appendChild(cont);
+          }
+        }
+
         wrap.appendChild(row);
       });
 
       document.getElementById('btnRelGeral').onclick = showGlobalReport;
     }
 
+    function openModal(title, list){
+      const m = document.getElementById('modal');
+      document.getElementById('modalTitle').textContent = title;
+      const body = document.getElementById('modalBody');
+      body.innerHTML = list.length
+        ? `<ul>${list.map(n=>`<li>${n}</li>`).join('')}</ul>`
+        : '<div>Ninguém faltou hoje. 🎉</div>';
+      m.style.display = 'flex';
+    }
+    function closeModal(){
+      document.getElementById('modal').style.display = 'none';
+    }
+    window.closeModal = closeModal;
+
     function showGroupDetail(group){
       const from = document.getElementById('from').value;
       const to   = document.getElementById('to').value;
 
       const byAluno = {}; // nome => {present, absent}
-      let resp = '';
+      let resp = groups[group]?.resp || '';
       rows.forEach(r=>{
         if (r.group !== group) return;
         if (!withinRange(r.date, from, to)) return;
@@ -237,24 +345,23 @@
     }
 
     async function refresh(){
-      await fetchAttendance();
+      await fetchAll();
       const from = document.getElementById('from').value;
       const to   = document.getElementById('to').value;
-      const stats = computeGroupStats(from, to);
+      const stats = computeStats(from, to);
       renderGroups(stats);
     }
 
-    // ===== INIT =====
+    // INIT
     (function(){
       setDefaultRange();
       document.getElementById('from').addEventListener('change', refresh);
       document.getElementById('to').addEventListener('change', refresh);
       document.getElementById('btnAtualizar').addEventListener('click', refresh);
-
       refresh().catch(err=>{
         console.error(err);
         document.getElementById('groupList').innerHTML =
-          `<div class="resultado erro">Erro ao carregar dados. Verifique se a planilha Attendance está <b>pública para leitura</b> e se a <b>API key</b> (Sheets API) está correta.</div>`;
+          `<div class="resultado erro">Erro ao carregar dados. Verifique se as abas <b>Attendance</b>, <b>Roster</b> e <b>Groups</b> existem e se a planilha está pública para leitura.</div>`;
       });
     })();
   </script>
