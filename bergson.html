@@ -36,7 +36,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>Chamada – <span id="groupTitle">PG 10</span></h1>
+    <h1>Chamada – <span id="groupTitle">PG10</span></h1>
 
     <div class="perguntas">
       <div class="subheader">
@@ -60,8 +60,8 @@
 
   <script>
     // ===== CONFIG (ajuste por página) =====
-    const GROUP = 'PG6'; // <-- troque por PG de cada arquivo
-    const DEFAULT_RESP = 'Professor Bruno'; // fallback se Groups não tiver
+    const GROUP = 'PG10'; // <-- troque por PG de cada arquivo
+    const DEFAULT_RESP = 'Professor Bergson'; // fallback se Groups não tiver
     const API_KEY = 'AIzaSyBuxhNxlYcLM88G6BggpNO8XG8w2BY9vSE';
     const SHEET_ID = '1SxFEoJfjJTlTXoKLiQsPRRYQVqqiPaA7wuHENIdUbhY';
     const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwaUzvxVKLcNj30FgbqZIddp6bK-_KDAgMa6IJlG-7C0M-fJ96Jy6-hdCPfgSaDICjA/exec';
@@ -170,7 +170,7 @@
         await fetch(WEB_APP_URL, {
           method: 'POST',
           mode: 'no-cors',
-          headers: { 'Content-Type': 'application/json' },
+          // NÃO definir headers aqui (evita preflight/CORS)
           body: JSON.stringify(payload)
         });
         document.body.innerHTML = `
@@ -195,17 +195,16 @@
       if (!nome) return alert('Digite o nome do aluno.');
       const payload = { acao:'addAluno', grupo: GROUP, nome };
       try {
-        const r = await fetch(WEB_APP_URL, {
+        await fetch(WEB_APP_URL, {
           method:'POST',
-          headers:{ 'Content-Type':'application/json' },
+          mode:'no-cors',
+          // sem headers
           body: JSON.stringify(payload)
         });
-        // Mesmo com no-cors funcionaria, mas aqui podemos ler a resposta (Apps Script não envia CORS, então se der erro, ignore leitura)
+      } finally {
         document.getElementById('novoAluno').value = '';
-        await loadRoster(); render();
-      } catch(e) {
-        // fallback: atualiza mesmo assim
-        await loadRoster(); render();
+        // dá um tempo pro Apps Script gravar e recarrega do Sheets
+        setTimeout(async () => { await loadRoster(); render(); }, 500);
       }
     }
 
