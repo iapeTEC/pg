@@ -170,7 +170,7 @@
         await fetch(WEB_APP_URL, {
           method: 'POST',
           mode: 'no-cors',
-          headers: { 'Content-Type': 'application/json' },
+          // NÃO definir headers aqui (evita preflight/CORS)
           body: JSON.stringify(payload)
         });
         document.body.innerHTML = `
@@ -195,17 +195,16 @@
       if (!nome) return alert('Digite o nome do aluno.');
       const payload = { acao:'addAluno', grupo: GROUP, nome };
       try {
-        const r = await fetch(WEB_APP_URL, {
+        await fetch(WEB_APP_URL, {
           method:'POST',
-          headers:{ 'Content-Type':'application/json' },
+          mode:'no-cors',
+          // sem headers
           body: JSON.stringify(payload)
         });
-        // Mesmo com no-cors funcionaria, mas aqui podemos ler a resposta (Apps Script não envia CORS, então se der erro, ignore leitura)
+      } finally {
         document.getElementById('novoAluno').value = '';
-        await loadRoster(); render();
-      } catch(e) {
-        // fallback: atualiza mesmo assim
-        await loadRoster(); render();
+        // dá um tempo pro Apps Script gravar e recarrega do Sheets
+        setTimeout(async () => { await loadRoster(); render(); }, 500);
       }
     }
 
