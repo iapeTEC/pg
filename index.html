@@ -18,21 +18,22 @@
   <link rel="stylesheet" href="styleApontamento.css">
 
   <style>
+    .top-actions { background:#2c2c2c; padding:12px; border-radius:8px; margin-bottom:12px; text-align:center; }
+    .botao { background:#9b59b6; border:none; border-radius:6px; padding:10px 14px; cursor:pointer; font-weight:bold; color:#fff; }
+    .botao.whats { background:#25D366; color:#1a1a1a; }
+    .botao.whats:hover { filter:brightness(.95); }
+
     .filters, .group-list, .report-area { background:#2c2c2c; padding:12px; border-radius:8px; margin-bottom:12px; }
     .filters { display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:center; }
     .filters input[type="date"] {
       background:#3d3d3d; border:1px solid #9b59b6; color:#fff; border-radius:6px; padding:10px; font-size:1em;
     }
-    .filters .botao { background:#9b59b6; border:none; border-radius:6px; padding:10px 14px; cursor:pointer; font-weight:bold; }
     /* Botão Imprimir no verde do tema */
-    .botao.print{
-      background:#2ecc71 !important;
-      color:#1a1a1a !important;
-    }
+    .botao.print{ background:#2ecc71 !important; color:#1a1a1a !important; }
     .botao.print:hover{ filter:brightness(.95); }
 
     .group-row { display:flex; gap:12px; justify-content:space-between; align-items:center; padding:12px 0; border-bottom:1px solid #3d3d3d; }
-    .group-left { flex:1; padding-right:48px; } /* reserva espaço pro knob não cobrir o botão */
+    .group-left { flex:1; padding-right:48px; } /* espaço p/ knob não cobrir o botão */
     .group-title { font-weight:bold; text-align:center; }
     .tiny { font-size:.9em; opacity:.85; text-align:center; }
 
@@ -51,7 +52,7 @@
       border:2px solid #1a1a1a;
       background:#b3d9ff; background-size:cover; background-position:center;
       box-shadow:0 0 0 2px #2c2c2c;
-      /* transform é definido inline pra ajustar 16px pra fora */
+      /* translate(16px,-50%) para “saltar” 16px p/ fora (meio diâmetro) */
     }
 
     .late-warning {
@@ -83,6 +84,12 @@
 <body>
   <div class="container">
     <h1 style="text-align:center;">Dashboard de Assiduidade</h1>
+
+    <!-- BOTÃO WHATSAPP (usa a data do campo “Até”) -->
+    <div class="top-actions no-print">
+      <button class="botao whats" id="btnWhats">Enviar faltosos no WhatsApp (data: Até)</button>
+      <div class="tiny" style="margin-top:6px;opacity:.75;">A mensagem usa a data do campo <b>“Até”</b>. Se estiver vazio, usa <b>hoje</b>.</div>
+    </div>
 
     <div class="filters no-print">
       <label>De: <input type="date" id="from"></label>
@@ -118,6 +125,7 @@
     const RANGE_ATT = 'Attendance!A2:F';
     const RANGE_ROS = 'Roster!A2:C';  // sem cabeçalho
     const RANGE_GRP = 'Groups!A2:C';  // sem cabeçalho
+    const WHATS_NUMBER = '5527998560748'; // +55 27 99856-0748
 
     // ===== STATE =====
     let rows = [];     // Attendance rows
@@ -133,6 +141,7 @@
       const d = new Intl.DateTimeFormat('en-CA', { timeZone: tz, day:'2-digit'}).format(now);
       return `${y}-${m}-${d}`;
     }
+    function fmtBR(iso){ if(!iso) return ''; const [y,m,d]=(iso||'').split('-'); return `${d}/${m}/${y}`; }
     function nowInTZ(tz='America/Recife'){ return new Date(new Date().toLocaleString('en-US',{timeZone:tz})); }
 
     function setDefaultRange(){
@@ -261,6 +270,54 @@
       return now.getTime() >= deadline.getTime();
     }
 
+    // ===== WHATSAPP =====
+    function collectAbsentsForDate(dayIso){
+      const day = dayIso || isoTodayInTZ();
+      const byGroup = {}; // { PGx: Set(keys) }
+      rows.forEach(r=>{
+        if (r.date !== day) return;
+        if (!isPG(r.group)) return;
+        if (Number(r.pres) !== 0) return;
+        const g = r.group;
+        const key = normKey(r.aluno);
+        if (!byGroup[g]) byGroup[g] = new Set();
+        byGroup[g].add(key);
+      });
+
+      // Converte para nomes “bonitos” usando roster
+      const result = {};
+      Object.keys(byGroup).forEach(g=>{
+        const pretty = k => rosterByGroupKey[g]?.[k] || k;
+        result[g] = [...byGroup[g]].map(pretty).sort((a,b)=> a.localeCompare(b,'pt-BR'));
+      });
+      return result;
+    }
+
+    function buildWhatsText(dayIso){
+      const day = dayIso || isoTodayInTZ();
+      const absents = collectAbsentsForDate(day);
+      const groupsOrdered = Object.keys(absents).sort((a,b)=> a.localeCompare(b,'pt-BR',{numeric:true}));
+      let lines = [`Alunos que não compareceram ao pequeno grupo no dia ${fmtBR(day)}:`,''];
+      if (!groupsOrdered.length) {
+        lines.push('Nenhum aluno faltou nesse dia.');
+      } else {
+        groupsOrdered.forEach(g=>{
+          const list = absents[g];
+          if (list.length) lines.push(`${g}: ${list.join(', ')}`);
+        });
+        if (lines.length <= 2) lines.push('Nenhum aluno faltou nesse dia.');
+      }
+      return lines.join('\n');
+    }
+
+    function sendWhatsAppForDate(){
+      const to = document.getElementById('to').value || isoTodayInTZ();
+      const text = buildWhatsText(to);
+      const url = `https://wa.me/${WHATS_NUMBER}?text=${encodeURIComponent(text)}`;
+      window.open(url, '_blank', 'noopener');
+    }
+
+    // ===== RENDER =====
     function renderGroups(stats){
       const wrap = document.getElementById('groupList');
       wrap.innerHTML = '';
@@ -282,7 +339,7 @@
         row.className = 'group-row';
         const photo = (groups[g]?.photo || '').trim();
 
-        // knob fora da barra, coladinho (+ ~16px = meio diâmetro)
+        // knob fora da barra, coladinho (16px = meio diâmetro)
         row.innerHTML = `
           <div class="group-left">
             <div class="group-title">${g} ${s.resp ? `<span class="tiny">• Resp.: ${s.resp}</span>`:''}</div>
@@ -417,6 +474,8 @@
       document.getElementById('from').addEventListener('change', refresh);
       document.getElementById('to').addEventListener('change', refresh);
       document.getElementById('btnAtualizar').addEventListener('click', refresh);
+      document.getElementById('btnWhats').addEventListener('click', sendWhatsAppForDate);
+
       refresh().catch(err=>{
         console.error(err);
         document.getElementById('groupList').innerHTML =
