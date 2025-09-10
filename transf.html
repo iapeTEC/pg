@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Transferência de Alunos</title>
+
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="./icons/favicon-16x16.png">
+  <link rel="manifest" href="./site.webmanifest">
+  <meta name="theme-color" content="#1a1a1a">
+
+  <link rel="stylesheet" href="styleApontamento.css">
+  <style>
+    h1 { text-align:center; }
+    .board { background:#2c2c2c; padding:12px; border-radius:8px; }
+    .row { display:flex; align-items:center; justify-content:space-between; padding:10px 8px; border-bottom:1px solid #3d3d3d; }
+    .row:nth-child(even) { background:#0e0e0e; } /* zebra */
+    .left { display:flex; align-items:center; gap:10px; }
+    .avatar { width:28px; height:28px; border-radius:50%; background:#444; background-size:cover; background-position:center; border:1px solid #222; }
+    .right select {
+      background:#3d3d3d; border:1px solid #9b59b6; color:#fff; border-radius:6px; padding:8px; min-width:110px;
+    }
+    .search { margin:10px 0; display:flex; justify-content:center; }
+    .search input {
+      background:#3d3d3d; border:1px solid #9b59b6; color:#fff; border-radius:6px; padding:10px; min-width:220px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Transferência de Alunos</h1>
+    <div class="search">
+      <input type="text" id="q" placeholder="Filtrar por nome..." />
+    </div>
+    <div class="board" id="list"></div>
+  </div>
+
+  <script>
+    // Mesmas credenciais do projeto
+    const API_KEY = 'AIzaSyBuxhNxlYcLM88G6BggpNO8XG8w2BY9vSE';
+    const SHEET_ID = '1SxFEoJfjJTlTXoKLiQsPRRYQVqqiPaA7wuHENIdUbhY';
+    const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwaUzvxVKLcNj30FgbqZIddp6bK-_KDAgMa6IJlG-7C0M-fJ96Jy6-hdCPfgSaDICjA/exec';
+    const RANGE_ROSTER = 'Roster!A:C';
+
+    const groupsList = Array.from({length:12}, (_,i)=>`PG${i+1}`);
+
+    let roster = [];  // [{group, aluno, photo}]
+    let filtered = [];
+
+    async function fetchValues(range){
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(range)}?key=${API_KEY}`;
+      const r = await fetch(url);
+      if (!r.ok) throw new Error('Falha ao ler: '+range);
+      const j = await r.json();
+      return j.values || [];
+    }
+
+    async function loadRoster(){
+      const vals = await fetchValues(RANGE_ROSTER).catch(()=>[]);
+      roster = vals.map(r => ({ group: r[0]||'', aluno:r[1]||'', photo:r[2]||'' }))
+                   .filter(x=>x.aluno)
+                   .sort((a,b)=> a.aluno.localeCompare(b.aluno,'pt-BR'));
+      filtered = roster.slice();
+    }
+
+    function render(){
+      const wrap = document.getElementById('list');
+      wrap.innerHTML = '';
+      filtered.forEach((r, idx)=>{
+        const row = document.createElement('div');
+        row.className = 'row';
+        row.innerHTML = `
+          <div class="left">
+            <div class="avatar" style="${r.photo ? `background-image:url('${r.photo.replace(/'/g,"\\'")}')` : ''}"></div>
+            <div>
+              <div>${r.aluno}</div>
+              <div style="opacity:.7;font-size:.9em;">${r.group}</div>
+            </div>
+          </div>
+          <div class="right">
+            <select data-idx="${idx}">
+              ${groupsList.map(g=>`<option value="${g}" ${g===r.group?'selected':''}>${g}</option>`).join('')}
+            </select>
+          </div>
+        `;
+        row.querySelector('select').addEventListener('change', async (ev)=>{
+          const toGroup = ev.target.value;
+          const item = filtered[Number(ev.target.dataset.idx)];
+          await transfer(item.aluno, toGroup, item.group);
+          // Atualiza local e re-renderiza
+          item.group = toGroup;
+          render();
+        });
+        wrap.appendChild(row);
+      });
+    }
+
+    async function transfer(nome, toGroup, fromGroup){
+      const payload = { acao:'transferirAluno', nome, toGroup, fromGroup };
+      try {
+        await fetch(WEB_APP_URL, {
+          method:'POST',
+          mode:'no-cors',
+          // sem headers para evitar preflight
+          body: JSON.stringify(payload)
+        });
+      } finally {
+        // Recarrega do Sheets para garantir que refletiu
+        setTimeout(async () => { await loadRoster(); render(); }, 500);
+      }
+    }
+
+    function onSearch(){
+      const q = (document.getElementById('q').value || '').trim().toLowerCase();
+      filtered = !q ? roster.slice() : roster.filter(r => r.aluno.toLowerCase().includes(q));
+      render();
+    }
+
+    (async function init(){
+      await loadRoster();
+      render();
+      document.getElementById('q').addEventListener('input', onSearch);
+    })();
+  </script>
+</body>
+</html>
