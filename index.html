@@ -52,7 +52,7 @@
       border:2px solid #1a1a1a;
       background:#b3d9ff; background-size:cover; background-position:center;
       box-shadow:0 0 0 2px #2c2c2c;
-      /* translate(16px,-50%) para “saltar” 16px p/ fora (meio diâmetro) */
+      /* translate(16px,-50%) faz “saltar” 16px p/ fora (meio diâmetro) */
     }
 
     .late-warning {
@@ -85,12 +85,13 @@
   <div class="container">
     <h1 style="text-align:center;">Dashboard de Assiduidade</h1>
 
-    <!-- BOTÃO WHATSAPP (usa a data do campo “Até”) -->
+    <!-- BOTÃO WHATSAPP (sempre usa a TERÇA vigente) -->
     <div class="top-actions no-print">
-      <button class="botao whats" id="btnWhats">Enviar faltosos no WhatsApp (data: Até)</button>
-      <div class="tiny" style="margin-top:6px;opacity:.75;">A mensagem usa a data do campo <b>“Até”</b>. Se estiver vazio, usa <b>hoje</b>.</div>
+      <button class="botao whats" id="btnWhats">Enviar faltosos da terça vigente no WhatsApp</button>
+      <div class="tiny" id="vigenteInfo" style="margin-top:6px;opacity:.75;"></div>
     </div>
 
+    <!-- Filtros só para relatórios cumulativos (PDF) -->
     <div class="filters no-print">
       <label>De: <input type="date" id="from"></label>
       <label>Até: <input type="date" id="to"></label>
@@ -112,7 +113,7 @@
   <!-- Modal -->
   <div class="modal-backdrop" id="modal">
     <div class="modal">
-      <h3 id="modalTitle">Faltosos de hoje</h3>
+      <h3 id="modalTitle">Faltosos</h3>
       <div id="modalBody"></div>
       <button class="btn" onclick="closeModal()">OK</button>
     </div>
@@ -133,37 +134,33 @@
     let groups = {};   // { PGx: {resp, photo} }
     let rosterByGroupKey = {}; // { PGx: { normKey(name): DisplayName } }
 
-    // ===== HELPERS =====
-    function isoTodayInTZ(tz='America/Recife') {
-      const now = new Date();
-      const y = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year:'numeric'}).format(now);
-      const m = new Intl.DateTimeFormat('en-CA', { timeZone: tz, month:'2-digit'}).format(now);
-      const d = new Intl.DateTimeFormat('en-CA', { timeZone: tz, day:'2-digit'}).format(now);
-      return `${y}-${m}-${d}`;
-    }
-    function fmtBR(iso){ if(!iso) return ''; const [y,m,d]=(iso||'').split('-'); return `${d}/${m}/${y}`; }
+    // ===== HELPERS DE DATA (fuso Recife) =====
     function nowInTZ(tz='America/Recife'){ return new Date(new Date().toLocaleString('en-US',{timeZone:tz})); }
+    function isoFromDate(d){ return d.toISOString().slice(0,10); }
+    function isoTodayInTZ(){ return isoFromDate(nowInTZ()); }
+    function fmtBR(iso){ if(!iso) return ''; const [y,m,d]=(iso||'').split('-'); return `${d}/${m}/${y}`; }
 
-    function setDefaultRange(){
-      const to = document.getElementById('to');
-      const from = document.getElementById('from');
-      to.value = isoTodayInTZ();
-      const d = nowInTZ(); d.setDate(d.getDate()-60);
-      from.value = d.toISOString().slice(0,10);
+    // Retorna a TERÇA vigente (última terça ≤ agora em Recife)
+    function currentTuesdayIso(){
+      const now = nowInTZ();
+      const dow = now.getDay(); // 0=Dom, 1=Seg, 2=Ter, ...
+      const offset = (dow - 2 + 7) % 7; // distância até terça mais recente
+      const t = new Date(now); t.setHours(0,0,0,0); t.setDate(t.getDate() - offset);
+      return isoFromDate(t);
+    }
+    // True se já passou da terça vigente às 19:30 (fica true o resto da semana)
+    function pastTuesdayDeadline(tuesdayIso){
+      const now = nowInTZ();
+      const [y,m,d] = tuesdayIso.split('-').map(Number);
+      const dl = new Date(Date.UTC(y, m-1, d, 22, 30, 0)); // 19:30 Recife ~= 22:30 UTC (sem DST)
+      // Para evitar confusão com UTC, recalcula em locale de Recife:
+      const local = new Date(`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}T19:30:00-03:00`);
+      return now.getTime() >= local.getTime();
     }
 
-    async function fetchValues(range){
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(range)}?key=${API_KEY}`;
-      const r = await fetch(url);
-      if (!r.ok) throw new Error('Falha ao ler: '+range);
-      return (await r.json()).values || [];
-    }
-
-    // normaliza grupo: "PG 6" -> "PG6"
-    function normGroup(g){ return String(g||'').toUpperCase().replace(/\s+/g,''); }
-    // é um PG válido?
+    // ===== NORMALIZAÇÃO =====
+    function normGroup(g){ return String(g||'').toUpperCase().replace(/\s+/g,''); } // "PG 6" -> "PG6"
     function isPG(name){ return /^PG\d+$/i.test(normGroup(name)); }
-    // chave normalizada de nome (remove NBSP, múltiplos espaços, trim, lower)
     function normKey(name){
       return String(name||'')
         .normalize('NFC')
@@ -178,8 +175,16 @@
       roster.forEach(r=>{
         const g = normGroup(r.group);
         if (!rosterByGroupKey[g]) rosterByGroupKey[g] = {};
-        rosterByGroupKey[g][normKey(r.aluno)] = r.aluno; // guarda o "bonito"
+        rosterByGroupKey[g][normKey(r.aluno)] = r.aluno; // guarda o nome “bonito”
       });
+    }
+
+    // ===== FETCH =====
+    async function fetchValues(range){
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(range)}?key=${API_KEY}`;
+      const r = await fetch(url);
+      if (!r.ok) throw new Error('Falha ao ler: '+range);
+      return (await r.json()).values || [];
     }
 
     async function fetchAll(){
@@ -189,7 +194,6 @@
         fetchValues(RANGE_GRP).catch(()=>[])
       ]);
 
-      // Attendance normalizado
       rows = att.map(a => ({
         ts:   a[0] || '',
         date: a[1] || '',
@@ -199,12 +203,10 @@
         pres: Number(a[5] || 0)
       }));
 
-      // Roster normalizado
       roster = ros
         .map(r => ({ group: normGroup(r[0]||''), aluno: r[1]||'', photo: r[2]||'' }))
         .filter(x=> x.aluno && isPG(x.group));
 
-      // Groups normalizado
       groups = {};
       grp.forEach(g=>{
         const key = normGroup(g[0]||'');
@@ -214,28 +216,19 @@
       buildRosterMaps();
     }
 
-    function withinRange(date, from, to){
-      return (!!date && (!from || date >= from) && (!to || date <= to));
-    }
-
-    function uniqueGroups(){
-      const from = document.getElementById('from').value;
-      const to   = document.getElementById('to').value;
-      const set = new Set(
-        rows.filter(r=> withinRange(r.date,from,to))
-            .map(r=>r.group)
-            .filter(isPG)
-      );
-      // adiciona grupos que ainda não tiveram chamada no range, mas existem no Groups/Roster
-      roster.forEach(r=> { if (isPG(r.group)) set.add(r.group); });
-      Object.keys(groups).forEach(g=> { if (isPG(g)) set.add(g); });
+    // ===== CÁLCULOS (sempre na TERÇA vigente) =====
+    function groupsUniverse(tuesdayIso){
+      const set = new Set();
+      rows.forEach(r=>{ if (r.date===tuesdayIso && isPG(r.group)) set.add(r.group); });
+      roster.forEach(r=>{ if (isPG(r.group)) set.add(r.group); });
+      Object.keys(groups).forEach(g=>{ if (isPG(g)) set.add(g); });
       return [...set].sort((a,b)=> a.localeCompare(b,'pt-BR',{numeric:true}));
     }
 
-    function computeStats(from, to){
-      const stats = {}; // group => {present,total,resp}
+    function statsForTuesday(tuesdayIso){
+      const stats = {}; // { PGx: {present,total,resp} }
       rows.forEach(r=>{
-        if (!withinRange(r.date, from, to)) return;
+        if (r.date !== tuesdayIso) return;
         if (!isPG(r.group)) return;
         const g = r.group;
         if (!stats[g]) stats[g] = {present:0, total:0, resp: groups[g]?.resp || ''};
@@ -246,100 +239,56 @@
       return stats;
     }
 
-    function todaysAbsentsByGroup(targetGroup){
-      const today = isoTodayInTZ();
-      const todayRows = rows.filter(r=> r.group===targetGroup && r.date===today);
-      if (!todayRows.length) return { absent: [], present: [] };
-
-      const presentKeys = new Set(todayRows.filter(r=> r.pres===1).map(r=> normKey(r.aluno)));
-      const absentKeys  = new Set(todayRows.filter(r=> r.pres===0).map(r=> normKey(r.aluno)));
-
-      const pretty = k => rosterByGroupKey[targetGroup]?.[k] || k;
-      return {
-        absent: [...absentKeys].map(pretty).sort((a,b)=>a.localeCompare(b,'pt-BR')),
-        present:[...presentKeys].map(pretty)
-      };
+    function absentsForGroupOnTuesday(group, tuesdayIso){
+      const dayRows = rows.filter(r=> r.group===group && r.date===tuesdayIso);
+      const absKeys = new Set(dayRows.filter(r=> Number(r.pres)===0).map(r=> normKey(r.aluno)));
+      const pretty = k => rosterByGroupKey[group]?.[k] || k;
+      return [...absKeys].map(pretty).sort((a,b)=> a.localeCompare(b,'pt-BR'));
     }
 
-    function isAfterTuesdayDeadline(){
-      const now = nowInTZ('America/Recife');
-      const isTuesday = (now.getDay() === 2); // 0=Dom ... 2=Terça
-      if (!isTuesday) return false;
-      const deadline = new Date(now);
-      deadline.setHours(19,30,0,0);
-      return now.getTime() >= deadline.getTime();
-    }
-
-    // ===== WHATSAPP =====
-    function collectAbsentsForDate(dayIso){
-      const day = dayIso || isoTodayInTZ();
-      const byGroup = {}; // { PGx: Set(keys) }
-      rows.forEach(r=>{
-        if (r.date !== day) return;
-        if (!isPG(r.group)) return;
-        if (Number(r.pres) !== 0) return;
-        const g = r.group;
-        const key = normKey(r.aluno);
-        if (!byGroup[g]) byGroup[g] = new Set();
-        byGroup[g].add(key);
+    // ===== WHATSAPP (terça vigente) =====
+    function buildWhatsTextForTuesday(tuesdayIso){
+      const groupsOrdered = groupsUniverse(tuesdayIso);
+      const lines = [`Alunos que não compareceram ao pequeno grupo no dia ${fmtBR(tuesdayIso)}:`, ''];
+      let any = false;
+      groupsOrdered.forEach(g=>{
+        const list = absentsForGroupOnTuesday(g, tuesdayIso);
+        if (list.length){
+          any = true;
+          lines.push(`${g}: ${list.join(', ')}`);
+        }
       });
-
-      // Converte para nomes “bonitos” usando roster
-      const result = {};
-      Object.keys(byGroup).forEach(g=>{
-        const pretty = k => rosterByGroupKey[g]?.[k] || k;
-        result[g] = [...byGroup[g]].map(pretty).sort((a,b)=> a.localeCompare(b,'pt-BR'));
-      });
-      return result;
-    }
-
-    function buildWhatsText(dayIso){
-      const day = dayIso || isoTodayInTZ();
-      const absents = collectAbsentsForDate(day);
-      const groupsOrdered = Object.keys(absents).sort((a,b)=> a.localeCompare(b,'pt-BR',{numeric:true}));
-      let lines = [`Alunos que não compareceram ao pequeno grupo no dia ${fmtBR(day)}:`,''];
-      if (!groupsOrdered.length) {
-        lines.push('Nenhum aluno faltou nesse dia.');
-      } else {
-        groupsOrdered.forEach(g=>{
-          const list = absents[g];
-          if (list.length) lines.push(`${g}: ${list.join(', ')}`);
-        });
-        if (lines.length <= 2) lines.push('Nenhum aluno faltou nesse dia.');
-      }
+      if (!any) lines.push('Nenhum aluno faltou nesse dia.');
       return lines.join('\n');
     }
-
-    function sendWhatsAppForDate(){
-      const to = document.getElementById('to').value || isoTodayInTZ();
-      const text = buildWhatsText(to);
+    function sendWhatsAppForTuesday(){
+      const tue = currentTuesdayIso();
+      const text = buildWhatsTextForTuesday(tue);
       const url = `https://wa.me/${WHATS_NUMBER}?text=${encodeURIComponent(text)}`;
       window.open(url, '_blank', 'noopener');
     }
 
-    // ===== RENDER =====
-    function renderGroups(stats){
+    // ===== UI =====
+    function renderGroups(tuesdayIso){
       const wrap = document.getElementById('groupList');
       wrap.innerHTML = '';
 
-      const order = uniqueGroups();
+      const order = groupsUniverse(tuesdayIso);
       if (!order.length) {
-        wrap.innerHTML = `<div class="resultado erro">Sem registros/roster para o período.</div>`;
+        wrap.innerHTML = `<div class="resultado erro">Sem registros/roster.</div>`;
         return;
       }
 
-      const afterDeadline = isAfterTuesdayDeadline();
-      const today = isoTodayInTZ();
+      const stats = statsForTuesday(tuesdayIso);
+      const afterDeadline = pastTuesdayDeadline(tuesdayIso);
 
       order.forEach(g=>{
         const s = stats[g] || {present:0,total:0,resp: (groups[g]?.resp || '')};
         const pct = s.total ? Math.round(100*s.present/s.total) : 0;
+        const photo = (groups[g]?.photo || '').trim();
 
         const row = document.createElement('div');
         row.className = 'group-row';
-        const photo = (groups[g]?.photo || '').trim();
-
-        // knob fora da barra, coladinho (16px = meio diâmetro)
         row.innerHTML = `
           <div class="group-left">
             <div class="group-title">${g} ${s.resp ? `<span class="tiny">• Resp.: ${s.resp}</span>`:''}</div>
@@ -348,30 +297,30 @@
               <div class="knob"
                    style="left:${pct}%; transform:translate(16px,-50%); ${photo ? `background-image:url('${photo.replace(/'/g,"\\'")}')` : ''}"></div>
             </div>
-            <div class="tiny">Assiduidade: ${pct}% (${s.present}/${s.total})</div>
+            <div class="tiny">Assiduidade (terça ${fmtBR(tuesdayIso)}): ${pct}% (${s.present}/${s.total})</div>
           </div>
           <div class="botoes no-print">
-            <button class="btn info" data-group="${g}">Relatório detalhado</button>
+            <button class="btn info" data-group="${g}">Relatório detalhado (terça)</button>
           </div>
         `;
-        row.querySelector('button[data-group]').onclick = () => showGroupDetail(g);
+        row.querySelector('button[data-group]').onclick = () => showGroupDetailTuesday(g, tuesdayIso);
 
-        // Aviso / faltosos de hoje
-        if (afterDeadline) {
-          const hasToday = rows.some(r=> r.group===g && r.date===today);
-          if (!hasToday) {
+        // Aviso/ação pós-deadline
+        if (afterDeadline){
+          const hasThisTuesday = rows.some(r=> r.group===g && r.date===tuesdayIso);
+          if (!hasThisTuesday){
             const warn = document.createElement('div');
             warn.className = 'late-warning';
             warn.textContent = 'Adulto ainda não enviou a lista de chamada';
             row.appendChild(warn);
           } else {
-            const { absent } = todaysAbsentsByGroup(g);
+            const absent = absentsForGroupOnTuesday(g, tuesdayIso);
             const cont = document.createElement('div');
             cont.className = 'late-actions';
             const b = document.createElement('button');
             b.className = 'btn info';
-            b.textContent = `Hoje faltou ${absent.length} aluno(s)`;
-            b.onclick = () => openModal(`Faltosos de hoje – ${g}`, absent);
+            b.textContent = `Nesta terça faltou ${absent.length} aluno(s)`;
+            b.onclick = () => openModal(`Faltosos – ${g} (terça ${fmtBR(tuesdayIso)})`, absent);
             cont.appendChild(b);
             row.appendChild(cont);
           }
@@ -379,8 +328,6 @@
 
         wrap.appendChild(row);
       });
-
-      document.getElementById('btnRelGeral').onclick = showGlobalReport;
     }
 
     function openModal(title, list){
@@ -389,29 +336,24 @@
       const body = document.getElementById('modalBody');
       body.innerHTML = list.length
         ? `<ul>${list.map(n=>`<li>${n}</li>`).join('')}</ul>`
-        : '<div>Ninguém faltou hoje. 🎉</div>';
+        : '<div>Ninguém faltou nessa terça. 🎉</div>';
       m.style.display = 'flex';
     }
-    function closeModal(){
-      document.getElementById('modal').style.display = 'none';
-    }
+    function closeModal(){ document.getElementById('modal').style.display = 'none'; }
     window.closeModal = closeModal;
 
-    function showGroupDetail(group){
-      const from = document.getElementById('from').value;
-      const to   = document.getElementById('to').value;
-
-      const byAluno = {}; // key => {name, present, absent}
+    // Detalhe por grupo — apenas terça vigente
+    function showGroupDetailTuesday(group, tuesdayIso){
+      const byAluno = {}; // key => {name, present, absent} (mas aqui só 1 dia, então present/absent ∈ {0,1})
       let resp = groups[group]?.resp || '';
+
       rows.forEach(r=>{
         if (r.group !== group) return;
-        if (!withinRange(r.date, from, to)) return;
-
+        if (r.date !== tuesdayIso) return;
         const key = normKey(r.aluno);
         const display = rosterByGroupKey[group]?.[key] || String(r.aluno||'').trim();
-
         if (!byAluno[key]) byAluno[key] = { name: display, present:0, absent:0 };
-        r.pres ? byAluno[key].present++ : byAluno[key].absent++;
+        Number(r.pres) ? byAluno[key].present++ : byAluno[key].absent++;
         if (r.resp) resp = r.resp;
       });
 
@@ -420,7 +362,7 @@
 
       const title = document.getElementById('detailTitle');
       const content = document.getElementById('detailContent');
-      title.textContent = `Relatório Detalhado – ${group} (Resp.: ${resp || '—'})`;
+      title.textContent = `Relatório Detalhado – ${group} (terça ${fmtBR(tuesdayIso)} • Resp.: ${resp || '—'})`;
 
       let html = `<table>
         <thead><tr><th>Aluno</th><th>Faltas</th><th>Presenças</th></tr></thead><tbody>`;
@@ -434,6 +376,8 @@
       window.scrollTo({ top: document.getElementById('detailArea').offsetTop-10, behavior:'smooth' });
     }
 
+    // Relatório cumulativo (usa De/Até, igual antes)
+    function withinRange(date, from, to){ return (!!date && (!from || date >= from) && (!to || date <= to)); }
     function showGlobalReport(){
       const from = document.getElementById('from').value;
       const to   = document.getElementById('to').value;
@@ -460,22 +404,28 @@
       setTimeout(()=>window.print(), 300);
     }
 
+    // ===== REFRESH =====
     async function refresh(){
       await fetchAll();
-      const from = document.getElementById('from').value;
-      const to   = document.getElementById('to').value;
-      const stats = computeStats(from, to);
-      renderGroups(stats);
+      const tue = currentTuesdayIso();
+      renderGroups(tue);
+      // Info da terça vigente + ajustar defaults dos filtros para essa terça
+      document.getElementById('vigenteInfo').textContent =
+        `Exibindo sempre a terça vigente: ${fmtBR(tue)} (atualiza automaticamente na próxima terça 00:00).`;
+      document.getElementById('from').value = tue;
+      document.getElementById('to').value   = tue;
     }
 
     // INIT
     (function(){
-      setDefaultRange();
-      document.getElementById('from').addEventListener('change', refresh);
-      document.getElementById('to').addEventListener('change', refresh);
+      // listeners
+      document.getElementById('from').addEventListener('change', ()=>{}); // apenas p/ relatórios PDF
+      document.getElementById('to').addEventListener('change', ()=>{});   // apenas p/ relatórios PDF
       document.getElementById('btnAtualizar').addEventListener('click', refresh);
-      document.getElementById('btnWhats').addEventListener('click', sendWhatsAppForDate);
+      document.getElementById('btnRelGeral').addEventListener('click', showGlobalReport);
+      document.getElementById('btnWhats').addEventListener('click', sendWhatsAppForTuesday);
 
+      // primeira carga
       refresh().catch(err=>{
         console.error(err);
         document.getElementById('groupList').innerHTML =
