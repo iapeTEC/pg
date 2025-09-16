@@ -18,6 +18,21 @@
   <link rel="stylesheet" href="styleApontamento.css">
 
   <style>
+    /* ===== Tokens inspirados no seu game-scores.css ===== */
+    :root{
+      --radius: 16px;
+      --bg: #0c0d10;
+      --bg-elev: #14161b;
+      --border: #262a32;
+      --bar-bg: #0f1217;
+      --bar-border: #1f232b;
+      --text: #e6e7ea;
+      --muted: #a2a8b3;
+      --green: #22c55e;
+      --blue: #3b82f6;
+      --shadow-lg: 0 10px 30px rgba(0,0,0,.35);
+    }
+
     .top-actions { background:#2c2c2c; padding:12px; border-radius:8px; margin-bottom:12px; text-align:center; }
     .botao { background:#9b59b6; border:none; border-radius:6px; padding:10px 14px; cursor:pointer; font-weight:bold; color:#fff; }
     .botao.whats { background:#25D366; color:#1a1a1a; }
@@ -32,35 +47,47 @@
     .botao.print{ background:#2ecc71 !important; color:#1a1a1a !important; }
     .botao.print:hover{ filter:brightness(.95); }
 
-    .group-row { display:flex; gap:12px; justify-content:space-between; align-items:center; padding:12px 0; border-bottom:1px solid #3d3d3d; }
-    .group-left { flex:1; padding-right:48px; } /* espaço p/ knob não cobrir o botão */
-    .group-title { font-weight:bold; text-align:center; }
+    .group-row {
+      display:flex; gap:12px; justify-content:space-between; align-items:center;
+      padding:12px; border:1px solid var(--border); border-radius: var(--radius);
+      background: var(--bg-elev); box-shadow: var(--shadow-lg); margin-bottom:12px;
+    }
+    .group-left { flex:1; padding-right:56px; } /* espaço pra o runner não cobrir o botão */
+    .group-title { font-weight:800; text-align:center; }
     .tiny { font-size:.9em; opacity:.85; text-align:center; }
 
-    .progress {
-      position:relative;
-      background:#3d3d3d;
-      height:16px;
-      border-radius:8px;
-      overflow:visible;          /* knob pode sair pra fora */
-      margin:8px 0 6px;
+    /* ===== Barra de progresso (mesmo efeito do seu CSS “bonito”) ===== */
+    .bar{
+      position:relative; height:18px;
+      background: var(--bar-bg);
+      border:1px solid var(--bar-border);
+      border-radius: 999px;
+      overflow: visible; margin-top:10px;
     }
-    .bar { height:100%; width:0%; background:#2ecc71; border-radius:8px; }
-    .knob {
-      position:absolute; top:50%;
-      width:28px; height:28px; border-radius:50%;
-      border:2px solid #1a1a1a;
-      background:#b3d9ff; background-size:cover; background-position:center;
-      box-shadow:0 0 0 2px #2c2c2c;
-      /* translate(16px,-50%) faz “saltar” 16px p/ fora (meio diâmetro) */
+    .fill{
+      position:absolute; inset:0 auto 0 0; width:0;
+      background: linear-gradient(90deg, var(--green), #86efac);
+      border-radius: 999px;
+      transition: width .6s ease; will-change: width;
     }
+    .runner{
+      position:absolute; top:50%; transform: translateY(-50%);
+      left:0; /* será sobrescrito inline */
+      width:34px; height:34px; border-radius:50%;
+      border:3px solid var(--green);
+      background: #0f1216;
+      display:grid; place-items:center;
+      box-shadow: 0 6px 16px rgba(34,197,94,.35);
+      transition: left .6s ease; will-change: left;
+    }
+    .runner img{ width:28px; height:28px; border-radius:50%; object-fit: cover; }
 
     .late-warning {
       background:#ff8a80; color:#1a1a1a; padding:8px; border-radius:6px; margin-top:6px; text-align:center;
     }
     .late-actions { margin-top:6px; display:flex; gap:8px; justify-content:center; }
-    .btn { border:none; border-radius:6px; padding:8px 12px; font-weight:bold; cursor:pointer; }
-    .btn.info { background:#3498db; color:#fff; }
+    .btn { border:none; border-radius:12px; padding:10px 14px; font-weight:700; cursor:pointer; }
+    .btn.info { background: var(--blue); color:#f0f9ff; }
 
     /* Modal */
     .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; z-index:999; }
@@ -68,7 +95,7 @@
     .modal h3 { margin-top:0; text-align:center; }
     .modal .btn { display:block; margin:10px auto 0; }
 
-    /* Tabela zebrada (relatórios) */
+    /* Tabelas */
     table { width:100%; border-collapse:collapse; font-size:.95em; }
     th, td { padding:8px; border-bottom:1px solid #3d3d3d; text-align:left; }
     tr:nth-child(even) { background:#262626; }
@@ -85,13 +112,13 @@
   <div class="container">
     <h1 style="text-align:center;">Dashboard de Assiduidade</h1>
 
-    <!-- BOTÃO WHATSAPP (sempre usa a TERÇA vigente) -->
+    <!-- WHATSAPP (terça vigente) -->
     <div class="top-actions no-print">
       <button class="botao whats" id="btnWhats">Enviar faltosos da terça vigente no WhatsApp</button>
       <div class="tiny" id="vigenteInfo" style="margin-top:6px;opacity:.75;"></div>
     </div>
 
-    <!-- Filtros só para relatórios cumulativos (PDF) -->
+    <!-- Filtros apenas para relatórios cumulativos (PDF) -->
     <div class="filters no-print">
       <label>De: <input type="date" id="from"></label>
       <label>Até: <input type="date" id="to"></label>
@@ -124,8 +151,8 @@
     const API_KEY = 'AIzaSyBuxhNxlYcLM88G6BggpNO8XG8w2BY9vSE';
     const SHEET_ID = '1SxFEoJfjJTlTXoKLiQsPRRYQVqqiPaA7wuHENIdUbhY';
     const RANGE_ATT = 'Attendance!A2:F';
-    const RANGE_ROS = 'Roster!A2:C';  // sem cabeçalho
-    const RANGE_GRP = 'Groups!A2:C';  // sem cabeçalho
+    const RANGE_ROS = 'Roster!A2:C';
+    const RANGE_GRP = 'Groups!A2:C';
     const WHATS_NUMBER = '5527998560748'; // +55 27 99856-0748
 
     // ===== STATE =====
@@ -134,32 +161,27 @@
     let groups = {};   // { PGx: {resp, photo} }
     let rosterByGroupKey = {}; // { PGx: { normKey(name): DisplayName } }
 
-    // ===== HELPERS DE DATA (fuso Recife) =====
+    // ===== Datas (fuso Recife) =====
     function nowInTZ(tz='America/Recife'){ return new Date(new Date().toLocaleString('en-US',{timeZone:tz})); }
     function isoFromDate(d){ return d.toISOString().slice(0,10); }
     function isoTodayInTZ(){ return isoFromDate(nowInTZ()); }
     function fmtBR(iso){ if(!iso) return ''; const [y,m,d]=(iso||'').split('-'); return `${d}/${m}/${y}`; }
 
-    // Retorna a TERÇA vigente (última terça ≤ agora em Recife)
     function currentTuesdayIso(){
       const now = nowInTZ();
-      const dow = now.getDay(); // 0=Dom, 1=Seg, 2=Ter, ...
-      const offset = (dow - 2 + 7) % 7; // distância até terça mais recente
+      const dow = now.getDay();           // 0=Dom, 1=Seg, 2=Ter...
+      const offset = (dow - 2 + 7) % 7;   // distância até a terça mais recente
       const t = new Date(now); t.setHours(0,0,0,0); t.setDate(t.getDate() - offset);
       return isoFromDate(t);
     }
-    // True se já passou da terça vigente às 19:30 (fica true o resto da semana)
     function pastTuesdayDeadline(tuesdayIso){
-      const now = nowInTZ();
       const [y,m,d] = tuesdayIso.split('-').map(Number);
-      const dl = new Date(Date.UTC(y, m-1, d, 22, 30, 0)); // 19:30 Recife ~= 22:30 UTC (sem DST)
-      // Para evitar confusão com UTC, recalcula em locale de Recife:
       const local = new Date(`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}T19:30:00-03:00`);
-      return now.getTime() >= local.getTime();
+      return nowInTZ().getTime() >= local.getTime();
     }
 
-    // ===== NORMALIZAÇÃO =====
-    function normGroup(g){ return String(g||'').toUpperCase().replace(/\s+/g,''); } // "PG 6" -> "PG6"
+    // ===== Normalização =====
+    function normGroup(g){ return String(g||'').toUpperCase().replace(/\s+/g,''); }
     function isPG(name){ return /^PG\d+$/i.test(normGroup(name)); }
     function normKey(name){
       return String(name||'')
@@ -169,24 +191,22 @@
         .trim()
         .toLowerCase();
     }
-
     function buildRosterMaps(){
       rosterByGroupKey = {};
       roster.forEach(r=>{
         const g = normGroup(r.group);
         if (!rosterByGroupKey[g]) rosterByGroupKey[g] = {};
-        rosterByGroupKey[g][normKey(r.aluno)] = r.aluno; // guarda o nome “bonito”
+        rosterByGroupKey[g][normKey(r.aluno)] = r.aluno;
       });
     }
 
-    // ===== FETCH =====
+    // ===== Fetch =====
     async function fetchValues(range){
       const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(range)}?key=${API_KEY}`;
       const r = await fetch(url);
       if (!r.ok) throw new Error('Falha ao ler: '+range);
       return (await r.json()).values || [];
     }
-
     async function fetchAll(){
       const [att, ros, grp] = await Promise.all([
         fetchValues(RANGE_ATT),
@@ -216,7 +236,7 @@
       buildRosterMaps();
     }
 
-    // ===== CÁLCULOS (sempre na TERÇA vigente) =====
+    // ===== Universo/Stats apenas na TERÇA vigente =====
     function groupsUniverse(tuesdayIso){
       const set = new Set();
       rows.forEach(r=>{ if (r.date===tuesdayIso && isPG(r.group)) set.add(r.group); });
@@ -224,7 +244,6 @@
       Object.keys(groups).forEach(g=>{ if (isPG(g)) set.add(g); });
       return [...set].sort((a,b)=> a.localeCompare(b,'pt-BR',{numeric:true}));
     }
-
     function statsForTuesday(tuesdayIso){
       const stats = {}; // { PGx: {present,total,resp} }
       rows.forEach(r=>{
@@ -238,7 +257,6 @@
       });
       return stats;
     }
-
     function absentsForGroupOnTuesday(group, tuesdayIso){
       const dayRows = rows.filter(r=> r.group===group && r.date===tuesdayIso);
       const absKeys = new Set(dayRows.filter(r=> Number(r.pres)===0).map(r=> normKey(r.aluno)));
@@ -246,7 +264,7 @@
       return [...absKeys].map(pretty).sort((a,b)=> a.localeCompare(b,'pt-BR'));
     }
 
-    // ===== WHATSAPP (terça vigente) =====
+    // ===== WhatsApp (terça vigente) =====
     function buildWhatsTextForTuesday(tuesdayIso){
       const groupsOrdered = groupsUniverse(tuesdayIso);
       const lines = [`Alunos que não compareceram ao pequeno grupo no dia ${fmtBR(tuesdayIso)}:`, ''];
@@ -268,7 +286,7 @@
       window.open(url, '_blank', 'noopener');
     }
 
-    // ===== UI =====
+    // ===== Render (usa barra bonita) =====
     function renderGroups(tuesdayIso){
       const wrap = document.getElementById('groupList');
       wrap.innerHTML = '';
@@ -292,10 +310,11 @@
         row.innerHTML = `
           <div class="group-left">
             <div class="group-title">${g} ${s.resp ? `<span class="tiny">• Resp.: ${s.resp}</span>`:''}</div>
-            <div class="progress">
-              <div class="bar" style="width:${pct}%"></div>
-              <div class="knob"
-                   style="left:${pct}%; transform:translate(16px,-50%); ${photo ? `background-image:url('${photo.replace(/'/g,"\\'")}')` : ''}"></div>
+            <div class="bar">
+              <div class="fill" style="width:${pct}%"></div>
+              <div class="runner" style="left:${pct}%">
+                ${photo ? `<img src="${photo.replace(/"/g,'&quot;')}" alt="foto ${g}">` : ''}
+              </div>
             </div>
             <div class="tiny">Assiduidade (terça ${fmtBR(tuesdayIso)}): ${pct}% (${s.present}/${s.total})</div>
           </div>
@@ -305,7 +324,7 @@
         `;
         row.querySelector('button[data-group]').onclick = () => showGroupDetailTuesday(g, tuesdayIso);
 
-        // Aviso/ação pós-deadline
+        // Pós-deadline (19:30)
         if (afterDeadline){
           const hasThisTuesday = rows.some(r=> r.group===g && r.date===tuesdayIso);
           if (!hasThisTuesday){
@@ -330,6 +349,7 @@
       });
     }
 
+    // Modal
     function openModal(title, list){
       const m = document.getElementById('modal');
       document.getElementById('modalTitle').textContent = title;
@@ -342,9 +362,9 @@
     function closeModal(){ document.getElementById('modal').style.display = 'none'; }
     window.closeModal = closeModal;
 
-    // Detalhe por grupo — apenas terça vigente
+    // Detalhe (terça vigente)
     function showGroupDetailTuesday(group, tuesdayIso){
-      const byAluno = {}; // key => {name, present, absent} (mas aqui só 1 dia, então present/absent ∈ {0,1})
+      const byAluno = {}; // key => {name, present, absent}
       let resp = groups[group]?.resp || '';
 
       rows.forEach(r=>{
@@ -376,7 +396,7 @@
       window.scrollTo({ top: document.getElementById('detailArea').offsetTop-10, behavior:'smooth' });
     }
 
-    // Relatório cumulativo (usa De/Até, igual antes)
+    // Relatório cumulativo (PDF) — mantém igual
     function withinRange(date, from, to){ return (!!date && (!from || date >= from) && (!to || date <= to)); }
     function showGlobalReport(){
       const from = document.getElementById('from').value;
@@ -404,28 +424,24 @@
       setTimeout(()=>window.print(), 300);
     }
 
-    // ===== REFRESH =====
+    // ===== Refresh =====
     async function refresh(){
       await fetchAll();
       const tue = currentTuesdayIso();
       renderGroups(tue);
-      // Info da terça vigente + ajustar defaults dos filtros para essa terça
       document.getElementById('vigenteInfo').textContent =
-        `Exibindo sempre a terça vigente: ${fmtBR(tue)} (atualiza automaticamente na próxima terça 00:00).`;
+        `Exibindo sempre a terça vigente: ${fmtBR(tue)} (renova automaticamente na próxima terça à 00:00).`;
+      // também deixo os filtros em terça vigente por padrão
       document.getElementById('from').value = tue;
       document.getElementById('to').value   = tue;
     }
 
     // INIT
     (function(){
-      // listeners
-      document.getElementById('from').addEventListener('change', ()=>{}); // apenas p/ relatórios PDF
-      document.getElementById('to').addEventListener('change', ()=>{});   // apenas p/ relatórios PDF
       document.getElementById('btnAtualizar').addEventListener('click', refresh);
       document.getElementById('btnRelGeral').addEventListener('click', showGlobalReport);
       document.getElementById('btnWhats').addEventListener('click', sendWhatsAppForTuesday);
 
-      // primeira carga
       refresh().catch(err=>{
         console.error(err);
         document.getElementById('groupList').innerHTML =
